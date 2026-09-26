@@ -58,6 +58,11 @@ pools:
         ops:
           size: 2000
           refill_time: 1000
+    balloon:
+      amount_mib: 0
+      deflate_on_oom: true
+      stats_polling_interval_s: 5
+      free_page_reporting: true
     metadata:
       example1: value1
 - name: fireactions-2vcpu-4gb

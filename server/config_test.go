@@ -77,6 +77,26 @@ func TestNewConfigRootfsInvalid(t *testing.T) {
 	assert.ErrorContains(t, err, "Config.Pools[0].Firecracker.Rootfs.RateLimiter.Ops.RefillTime")
 }
 
+func TestNewConfigBalloon(t *testing.T) {
+	config, err := NewConfig("testdata/config1.yaml")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assert.Equal(t, &FirecrackerBalloonConfig{
+		AmountMib: 0, DeflateOnOom: true, StatsPollingIntervalS: 5, FreePageReporting: true,
+	}, config.Pools[0].Firecracker.Balloon)
+
+	// A pool without a balloon block gets no balloon device.
+	assert.Nil(t, config.Pools[1].Firecracker.Balloon)
+}
+
+func TestNewConfigBalloonInvalid(t *testing.T) {
+	// A negative balloon size is rejected.
+	_, err := NewConfig("testdata/config4.yaml")
+	assert.ErrorContains(t, err, "Config.Pools[0].Firecracker.Balloon.AmountMib")
+}
+
 func TestFirecrackerRateLimiterConfigToSDK(t *testing.T) {
 	var nilRateLimiter *FirecrackerRateLimiterConfig
 	assert.Nil(t, nilRateLimiter.toSDK())

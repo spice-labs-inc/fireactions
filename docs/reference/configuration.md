@@ -241,6 +241,45 @@ pools:
           size: 2000
           refill_time: 1000
     #
+    # Firecracker memory balloon device. Requires a guest kernel with
+    # CONFIG_VIRTIO_BALLOON (and CONFIG_PAGE_REPORTING for free page
+    # reporting). The device can only be attached before boot, so the
+    # options apply to MicroVMs created after the change.
+    #
+    # Default: {} (no balloon device)
+    #
+    balloon:
+      #
+      # Initial target size of the balloon in MiB. 0 attaches the device
+      # without taking memory from the guest; the target can be changed later
+      # through the Firecracker API (PATCH /balloon).
+      #
+      # Default: 0
+      #
+      amount_mib: 0
+      #
+      # Let the guest take pages back from the balloon instead of running
+      # into an out-of-memory state.
+      #
+      # Default: false
+      #
+      deflate_on_oom: true
+      #
+      # Interval in seconds between balloon statistics updates. 0 disables
+      # the statistics.
+      #
+      # Default: 0
+      #
+      stats_polling_interval_s: 0
+      #
+      # Let the guest continually report memory it no longer uses, so the
+      # host can reclaim it. Without it, a MicroVM keeps its peak memory
+      # usage on the host until it exits.
+      #
+      # Default: false
+      #
+      free_page_reporting: true
+    #
     # Metadata to pass to the Firecracker VM via MMDS.
     #
     # Default: {}

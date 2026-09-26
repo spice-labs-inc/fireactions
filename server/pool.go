@@ -535,6 +535,11 @@ func (p *Pool) createMachine(ctx context.Context) error {
 
 	fcMachine.Handlers.FcInit = fcMachine.Handlers.FcInit.Append(firecracker.NewSetMetadataHandler(metadata))
 
+	if balloonConfig := p.config.Firecracker.Balloon; balloonConfig != nil {
+		socketPath := filepath.Join(p.GetDir(), fmt.Sprintf("%s.sock", runnerName))
+		fcMachine.Handlers.FcInit = fcMachine.Handlers.FcInit.Append(newCreateBalloonHandler(socketPath, balloonConfig))
+	}
+
 	vmmCtx, vmmCancel := context.WithCancel(p.ctx)
 	if err := fcMachine.Start(vmmCtx); err != nil {
 		vmmCancel()
