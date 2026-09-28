@@ -55,6 +55,7 @@ type FirecrackerConfig struct {
 	MachineConfig    FirecrackerMachineConfig           `yaml:"machine_config"`
 	NetworkInterface *FirecrackerNetworkInterfaceConfig `yaml:"network_interface"`
 	Rootfs           *FirecrackerRootfsConfig           `yaml:"rootfs"`
+	Balloon          *FirecrackerBalloonConfig          `yaml:"balloon"`
 	Metadata         map[string]interface{}             `yaml:"metadata"`
 }
 
@@ -74,6 +75,15 @@ type FirecrackerNetworkInterfaceConfig struct {
 // limiter is optional, a nil limiter leaves the device unlimited.
 type FirecrackerRootfsConfig struct {
 	RateLimiter *FirecrackerRateLimiterConfig `yaml:"rate_limiter"`
+}
+
+// FirecrackerBalloonConfig configures the MicroVM's memory balloon device. A
+// nil balloon leaves the MicroVM without one.
+type FirecrackerBalloonConfig struct {
+	AmountMib             int64 `yaml:"amount_mib" validate:"gte=0"`
+	DeflateOnOom          bool  `yaml:"deflate_on_oom"`
+	StatsPollingIntervalS int64 `yaml:"stats_polling_interval_s" validate:"gte=0"`
+	FreePageReporting     bool  `yaml:"free_page_reporting"`
 }
 
 // FirecrackerRateLimiterConfig defines an IO rate limiter with independent
