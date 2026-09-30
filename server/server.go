@@ -133,6 +133,7 @@ func (s *Server) Run(ctx context.Context) error {
 		_ = listener.Close()
 	}()
 
+	pools := make([]*Pool, 0, len(s.config.Pools))
 	for _, poolConfig := range s.config.Pools {
 		pool, err := NewPool(s.logger, poolConfig, s.github, s.imageManager, s.containerd, &s.nextCID)
 		if err != nil {
@@ -140,8 +141,18 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 
 		s.pools[poolConfig.Name] = pool
+		pools = append(pools, pool)
+	}
+
+	// Sweep every pool before any pool starts, so a sweep never sees VMs
+	// another pool is creating under the same runner name.
+	for _, pool := range pools {
+		pool.SweepCNI(ctx)
+	}
+
+	for _, pool := range pools {
 		go pool.Run()
-		s.logger.Info().Msgf("Pool %s started", poolConfig.Name)
+		s.logger.Info().Msgf("Pool %s started", pool.config.Name)
 	}
 
 	errGroup := &errgroup.Group{}
