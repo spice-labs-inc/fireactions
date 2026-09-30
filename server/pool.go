@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -455,8 +457,9 @@ func (p *Pool) createMachine(ctx context.Context) error {
 		Build(ctx)
 
 	logger := logrus.New()
-	logger.SetLevel(logrus.DebugLevel)
+	logger.SetLevel(logrus.WarnLevel)
 	logger.SetOutput(io.Discard)
+	logger.AddHook(&logrusWarnHook{logger: p.logger, vmID: runnerName})
 
 	vsockPath := filepath.Join(p.GetDir(), fmt.Sprintf("%s.vsock", runnerName))
 	vsockCID := p.nextCID.Add(1)
@@ -474,7 +477,7 @@ func (p *Pool) createMachine(ctx context.Context) error {
 
 	networkInterface := firecracker.NetworkInterface{
 		AllowMMDS:        true,
-		CNIConfiguration: &firecracker.CNIConfiguration{NetworkName: "fireactions", IfName: "eth0", ConfDir: "/etc/cni/net.d", BinPath: []string{"/opt/cni/bin"}},
+		CNIConfiguration: &firecracker.CNIConfiguration{NetworkName: cniNetworkName, IfName: cniIfName, ConfDir: cniConfDir, BinPath: []string{cniBinDir}},
 	}
 
 	if networkInterfaceConfig := p.config.Firecracker.NetworkInterface; networkInterfaceConfig != nil {
@@ -540,9 +543,10 @@ func (p *Pool) createMachine(ctx context.Context) error {
 		fcMachine.Handlers.FcInit = fcMachine.Handlers.FcInit.Append(newCreateBalloonHandler(socketPath, balloonConfig))
 	}
 
-	vmmCtx, vmmCancel := context.WithCancel(p.ctx)
+	vmmCtx, vmmCancel := p.newVMMContext()
 	if err := fcMachine.Start(vmmCtx); err != nil {
 		vmmCancel()
+		p.removeCNICacheDir(runnerName)
 		return fmt.Errorf("firecracker: starting machine: %w", err)
 	}
 
@@ -598,6 +602,7 @@ func (p *Pool) createMachine(ctx context.Context) error {
 		p.machinesMu.Unlock()
 
 		machine.vmmCancel()
+		p.removeCNICacheDir(runnerName)
 
 		p.deleteGitHubRunner(runnerName, machine.RunnerID)
 
@@ -644,6 +649,72 @@ func (p *Pool) deleteMachine(_ context.Context) error {
 
 	p.logger.Info().Msgf("Successfully removed VM %s", targetName)
 	return nil
+}
+
+// SweepCNI removes the CNI state of this pool's VMs that exited without
+// their CNI DEL running, such as after a crash. It must run before the pool
+// creates VMs.
+func (p *Pool) SweepCNI(ctx context.Context) {
+	swept, err := newCNISweeper(p.logger).sweep(ctx, p.ownsVM, p.isVMRunning)
+	if err != nil {
+		p.logger.Warn().Err(err).Msg("Failed to sweep CNI leftovers")
+	}
+
+	if swept > 0 {
+		p.logger.Info().Msgf("Removed CNI leftovers of %d exited VMs", swept)
+	}
+}
+
+// newVMMContext returns the context a VM runs under. It is deliberately not
+// derived from the pool context: firecracker-go-sdk runs the VM's CNI DEL with
+// it after the VM exits, and Stop() cancels the pool context before it stops
+// the VMs.
+func (p *Pool) newVMMContext() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
+}
+
+func (p *Pool) removeCNICacheDir(runnerName string) {
+	dir := filepath.Join(cniCacheDir, runnerName)
+
+	err := removeEmptyCNICacheDir(dir)
+	if err != nil {
+		p.logger.Warn().Err(err).Msgf("Failed to remove CNI cache directory %s", dir)
+	}
+}
+
+// ownsVM reports whether vmID has the form of a VM name this pool creates.
+func (p *Pool) ownsVM(vmID string) bool {
+	suffix, ok := strings.CutPrefix(vmID, p.config.Runner.Name+"-")
+	if !ok || len(suffix) != 2*stringid.StringIDLength {
+		return false
+	}
+
+	_, err := hex.DecodeString(suffix)
+
+	return err == nil
+}
+
+// isVMRunning reports whether vmID is a VM of this pool or a Firecracker
+// process still answers on the VM's API socket.
+func (p *Pool) isVMRunning(vmID string) bool {
+	p.machinesMu.Lock()
+	_, ok := p.machines[vmID]
+	p.machinesMu.Unlock()
+
+	if ok {
+		return true
+	}
+
+	dialer := net.Dialer{Timeout: time.Second}
+
+	conn, err := dialer.DialContext(p.ctx, "unix", filepath.Join(p.GetDir(), fmt.Sprintf("%s.sock", vmID)))
+	if err != nil {
+		return false
+	}
+
+	_ = conn.Close()
+
+	return true
 }
 
 // createSnapshot creates a snapshot of the specified image.
